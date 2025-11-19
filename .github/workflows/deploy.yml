@@ -5,22 +5,22 @@ on:
     branches:
       - main
     tags:
-      - 'v*'   # triggers on version tags like v1.0.0
+      - 'v*'   # version tags like v1.0.0
 
 jobs:
 
   # ------------------------------------------------------
-  # 1️⃣ BUILD & PUSH DOCKER IMAGE
+  # 1️⃣ Build & Push Docker Image
   # ------------------------------------------------------
   build:
     runs-on: ubuntu-latest
     outputs:
-      image-version: ${{ steps.set-tag.outputs.tag }}
+      image-version: ${{ steps.set-tag.outputs.docker_tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Determine Docker Tag (version)
+      - name: Set Docker tag
         id: set-tag
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
@@ -28,14 +28,10 @@ jobs:
           else
             TAG=${GITHUB_REF#refs/heads/}
           fi
-
           TAG=$(echo "$TAG" | tr '[:upper:]' '[:lower:]')
-
-          # Set environment variable for Docker build
           echo "TAG=$TAG" >> $GITHUB_ENV
-
-          # Set job output for passing to other jobs
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "docker_tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Determined Docker tag: $TAG"
 
       - name: Docker Login
         uses: docker/login-action@v3
@@ -51,13 +47,12 @@ jobs:
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-app:${{ env.TAG }}
 
   # ------------------------------------------------------
-  # 2️⃣ DEPLOY TO DEV
+  # 2️⃣ Deploy to DEV
   # ------------------------------------------------------
   deploy-dev:
     runs-on: ubuntu-latest
     needs: build
-    environment:
-      name: dev
+    environment: dev
     steps:
       - name: Deploy to DEV via SSH
         uses: appleboy/ssh-action@v0.1.8
@@ -67,12 +62,13 @@ jobs:
           key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
           script: |
             VERSION=${{ needs.build.outputs.image-version }}
+            echo "Deploying to DEV with version: $VERSION"
             cd /home/ubuntu/BuyDecision/Dev
             chmod +x start.sh
             ./start.sh $VERSION
 
   # ------------------------------------------------------
-  # 3️⃣ MANUAL APPROVAL FOR UAT
+  # 3️⃣ Manual approval for UAT
   # ------------------------------------------------------
   uat-approval:
     runs-on: ubuntu-latest
@@ -84,11 +80,11 @@ jobs:
         run: echo "Approved for UAT deployment"
 
   # ------------------------------------------------------
-  # 4️⃣ DEPLOY TO UAT
+  # 4️⃣ Deploy to UAT
   # ------------------------------------------------------
   deploy-uat:
     runs-on: ubuntu-latest
-    needs: uat-approval
+    needs: [uat-approval, build]
     steps:
       - name: Deploy to UAT via SSH
         uses: appleboy/ssh-action@v0.1.8
@@ -98,12 +94,13 @@ jobs:
           key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
           script: |
             VERSION=${{ needs.build.outputs.image-version }}
+            echo "Deploying to UAT with version: $VERSION"
             cd /home/ubuntu/BuyDecision/UAT
             chmod +x start.sh
             ./start.sh $VERSION
 
   # ------------------------------------------------------
-  # 5️⃣ MANUAL APPROVAL FOR PROD
+  # 5️⃣ Manual approval for PROD
   # ------------------------------------------------------
   prod-approval:
     runs-on: ubuntu-latest
@@ -115,11 +112,11 @@ jobs:
         run: echo "Approved for PROD deployment"
 
   # ------------------------------------------------------
-  # 6️⃣ DEPLOY TO PROD
+  # 6️⃣ Deploy to PROD
   # ------------------------------------------------------
   deploy-prod:
     runs-on: ubuntu-latest
-    needs: prod-approval
+    needs: [prod-approval, build]
     steps:
       - name: Deploy to PROD via SSH
         uses: appleboy/ssh-action@v0.1.8
@@ -129,6 +126,7 @@ jobs:
           key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
           script: |
             VERSION=${{ needs.build.outputs.image-version }}
+            echo "Deploying to PROD with version: $VERSION"
             cd /home/ubuntu/BuyDecision/Prod
             chmod +x start.sh
             ./start.sh $VERSION
