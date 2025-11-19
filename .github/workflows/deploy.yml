@@ -5,7 +5,7 @@ on:
     branches:
       - main
     tags:
-      - 'v*'   # Version tags like v1.0.0
+      - 'v*'   # triggers on version tags like v1.0.0
 
 jobs:
 
@@ -15,9 +15,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      image-version: ${{ steps.set-tag.outputs.TAG }}
+      image-version: ${{ steps.set-tag.outputs.tag }}
     steps:
-
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -32,8 +31,11 @@ jobs:
 
           TAG=$(echo "$TAG" | tr '[:upper:]' '[:lower:]')
 
+          # Set environment variable for Docker build
           echo "TAG=$TAG" >> $GITHUB_ENV
-          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+
+          # Set job output for passing to other jobs
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
 
       - name: Docker Login
         uses: docker/login-action@v3
@@ -49,13 +51,14 @@ jobs:
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-app:${{ env.TAG }}
 
   # ------------------------------------------------------
-  # 2️⃣ AUTO DEPLOY TO DEV
+  # 2️⃣ DEPLOY TO DEV
   # ------------------------------------------------------
   deploy-dev:
     runs-on: ubuntu-latest
     needs: build
+    environment:
+      name: dev
     steps:
-
       - name: Deploy to DEV via SSH
         uses: appleboy/ssh-action@v0.1.8
         with:
@@ -69,13 +72,13 @@ jobs:
             ./start.sh $VERSION
 
   # ------------------------------------------------------
-  # 3️⃣ WAIT FOR MANUAL UAT APPROVAL
+  # 3️⃣ MANUAL APPROVAL FOR UAT
   # ------------------------------------------------------
   uat-approval:
     runs-on: ubuntu-latest
     needs: deploy-dev
     environment:
-      name: uat     # Create this environment in GitHub
+      name: uat
     steps:
       - name: Wait for UAT approval
         run: echo "Approved for UAT deployment"
@@ -87,7 +90,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: uat-approval
     steps:
-
       - name: Deploy to UAT via SSH
         uses: appleboy/ssh-action@v0.1.8
         with:
@@ -101,13 +103,13 @@ jobs:
             ./start.sh $VERSION
 
   # ------------------------------------------------------
-  # 5️⃣ WAIT FOR MANUAL PROD APPROVAL
+  # 5️⃣ MANUAL APPROVAL FOR PROD
   # ------------------------------------------------------
   prod-approval:
     runs-on: ubuntu-latest
     needs: deploy-uat
     environment:
-      name: prod     # Create this environment in GitHub
+      name: prod
     steps:
       - name: Wait for PROD approval
         run: echo "Approved for PROD deployment"
@@ -119,7 +121,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: prod-approval
     steps:
-
       - name: Deploy to PROD via SSH
         uses: appleboy/ssh-action@v0.1.8
         with:
