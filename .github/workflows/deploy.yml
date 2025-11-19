@@ -5,19 +5,23 @@ on:
     branches:
       - main
     tags:
-      - 'v*'
+      - 'v*'   # Version tags like v1.0.0
 
 jobs:
 
+  # ------------------------------------------------------
+  # 1️⃣ BUILD & PUSH DOCKER IMAGE
+  # ------------------------------------------------------
   build:
     runs-on: ubuntu-latest
     outputs:
-      image-version: ${{ steps.set-tag.outputs.tag }}
+      image-version: ${{ steps.set-tag.outputs.TAG }}
     steps:
+
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set Docker tag
+      - name: Determine Docker Tag (version)
         id: set-tag
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
@@ -25,9 +29,11 @@ jobs:
           else
             TAG=${GITHUB_REF#refs/heads/}
           fi
+
           TAG=$(echo "$TAG" | tr '[:upper:]' '[:lower:]')
+
           echo "TAG=$TAG" >> $GITHUB_ENV
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
 
       - name: Docker Login
         uses: docker/login-action@v3
@@ -35,19 +41,21 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and Push Docker Image
+      - name: Build & Push Docker Image
         uses: docker/build-push-action@v4
         with:
           context: .
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-app:${{ env.TAG }}
 
+  # ------------------------------------------------------
+  # 2️⃣ AUTO DEPLOY TO DEV
+  # ------------------------------------------------------
   deploy-dev:
     runs-on: ubuntu-latest
     needs: build
-    environment:
-      name: dev
     steps:
+
       - name: Deploy to DEV via SSH
         uses: appleboy/ssh-action@v0.1.8
         with:
@@ -57,20 +65,29 @@ jobs:
           script: |
             VERSION=${{ needs.build.outputs.image-version }}
             cd /home/ubuntu/BuyDecision/Dev
+            chmod +x start.sh
             ./start.sh $VERSION
 
+  # ------------------------------------------------------
+  # 3️⃣ WAIT FOR MANUAL UAT APPROVAL
+  # ------------------------------------------------------
   uat-approval:
     runs-on: ubuntu-latest
     needs: deploy-dev
     environment:
-      name: uat
+      name: uat     # Create this environment in GitHub
     steps:
-      - run: echo "Waiting for UAT approval..."
+      - name: Wait for UAT approval
+        run: echo "Approved for UAT deployment"
 
+  # ------------------------------------------------------
+  # 4️⃣ DEPLOY TO UAT
+  # ------------------------------------------------------
   deploy-uat:
     runs-on: ubuntu-latest
     needs: uat-approval
     steps:
+
       - name: Deploy to UAT via SSH
         uses: appleboy/ssh-action@v0.1.8
         with:
@@ -80,20 +97,29 @@ jobs:
           script: |
             VERSION=${{ needs.build.outputs.image-version }}
             cd /home/ubuntu/BuyDecision/UAT
+            chmod +x start.sh
             ./start.sh $VERSION
 
+  # ------------------------------------------------------
+  # 5️⃣ WAIT FOR MANUAL PROD APPROVAL
+  # ------------------------------------------------------
   prod-approval:
     runs-on: ubuntu-latest
     needs: deploy-uat
     environment:
-      name: prod
+      name: prod     # Create this environment in GitHub
     steps:
-      - run: echo "Waiting for PROD approval..."
+      - name: Wait for PROD approval
+        run: echo "Approved for PROD deployment"
 
+  # ------------------------------------------------------
+  # 6️⃣ DEPLOY TO PROD
+  # ------------------------------------------------------
   deploy-prod:
     runs-on: ubuntu-latest
     needs: prod-approval
     steps:
+
       - name: Deploy to PROD via SSH
         uses: appleboy/ssh-action@v0.1.8
         with:
@@ -103,4 +129,5 @@ jobs:
           script: |
             VERSION=${{ needs.build.outputs.image-version }}
             cd /home/ubuntu/BuyDecision/Prod
+            chmod +x start.sh
             ./start.sh $VERSION
