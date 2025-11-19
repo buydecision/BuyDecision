@@ -1,16 +1,31 @@
-name: Deploy to Lightsail
+name: Versioned Deployment to Lightsail
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
+    tags:
+      - "v*"   # Trigger on version tags like v1.0.0
 
 jobs:
-  deploy:
-    runs-on: ubuntu-latest
 
+  # -----------------------------
+  # 1️⃣ Build Docker Image
+  # -----------------------------
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image-version: ${{ steps.set-version.outputs.VERSION }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set VERSION
+        id: set-version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "::set-output name=VERSION::$VERSION"
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -23,13 +38,82 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-app:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-app:${{ env.VERSION }}
 
-      - name: SSH into Lightsail and deploy
+  # -----------------------------
+  # 2️⃣ Deploy to Dev
+  # -----------------------------
+  deploy-dev:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to DEV via SSH
         uses: appleboy/ssh-action@v0.1.8
         with:
           host: ${{ secrets.LIGHTSAIL_IP }}
           username: ${{ secrets.LIGHTSAIL_SSH_USER }}
           key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
           script: |
-            ~/deploy/start.sh
+            VERSION=${{ needs.build.outputs.image-version }}
+            cd /home/ubuntu/BuyDecision/Dev
+            ./start.sh $VERSION
+
+  # -----------------------------
+  # 3️⃣ Manual approval for UAT
+  # -----------------------------
+  uat-approval:
+    runs-on: ubuntu-latest
+    needs: deploy-dev
+    environment:
+      name: uat  # Set up "uat" environment in GitHub with required reviewers
+    steps:
+      - name: Await manual approval
+        run: echo "Waiting for UAT approval..."
+
+  # -----------------------------
+  # 4️⃣ Deploy to UAT
+  # -----------------------------
+  deploy-uat:
+    runs-on: ubuntu-latest
+    needs: uat-approval
+    steps:
+      - name: Deploy to UAT via SSH
+        uses: appleboy/ssh-action@v0.1.8
+        with:
+          host: ${{ secrets.LIGHTSAIL_IP }}
+          username: ${{ secrets.LIGHTSAIL_SSH_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            VERSION=${{ needs.build.outputs.image-version }}
+            cd /home/ubuntu/BuyDecision/UAT
+            ./start.sh $VERSION
+
+  # -----------------------------
+  # 5️⃣ Manual approval for Prod
+  # -----------------------------
+  prod-approval:
+    runs-on: ubuntu-latest
+    needs: deploy-uat
+    environment:
+      name: prod  # Set up "prod" environment in GitHub with required reviewers
+    steps:
+      - name: Await manual approval
+        run: echo "Waiting for PROD approval..."
+
+  # -----------------------------
+  # 6️⃣ Deploy to Prod
+  # -----------------------------
+  deploy-prod:
+    runs-on: ubuntu-latest
+    needs: prod-approval
+    steps:
+      - name: Deploy to PROD via SSH
+        uses: appleboy/ssh-action@v0.1.8
+        with:
+          host: ${{ secrets.LIGHTSAIL_IP }}
+          username: ${{ secrets.LIGHTSAIL_SSH_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            VERSION=${{ needs.build.outputs.image-version }}
+            cd /home/ubuntu/BuyDecision/Prod
+            ./start.sh $VERSION
