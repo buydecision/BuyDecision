@@ -5,17 +5,14 @@ on:
     branches:
       - main
     tags:
-      - 'v*'   # triggers on version tags like v1.0.0
+      - 'v*'
 
 jobs:
 
-  # -----------------------------
-  # 1️⃣ Build Docker Image
-  # -----------------------------
   build:
     runs-on: ubuntu-latest
     outputs:
-      image-version: ${{ steps.set-tag.outputs.TAG }}
+      image-version: ${{ steps.set-tag.outputs.tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -23,16 +20,14 @@ jobs:
       - name: Set Docker tag
         id: set-tag
         run: |
-          # Determine if push is a tag or branch
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            TAG=${GITHUB_REF#refs/tags/}      # e.g., v1.0.0
+            TAG=${GITHUB_REF#refs/tags/}
           else
-            TAG=${GITHUB_REF#refs/heads/}     # e.g., main
+            TAG=${GITHUB_REF#refs/heads/}
           fi
-          # Convert to lowercase for Docker
           TAG=$(echo "$TAG" | tr '[:upper:]' '[:lower:]')
           echo "TAG=$TAG" >> $GITHUB_ENV
-          echo "::set-output name=TAG::$TAG"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
 
       - name: Docker Login
         uses: docker/login-action@v3
@@ -47,12 +42,11 @@ jobs:
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-app:${{ env.TAG }}
 
-  # -----------------------------
-  # 2️⃣ Deploy to Dev
-  # -----------------------------
   deploy-dev:
     runs-on: ubuntu-latest
     needs: build
+    environment:
+      name: dev
     steps:
       - name: Deploy to DEV via SSH
         uses: appleboy/ssh-action@v0.1.8
@@ -65,21 +59,14 @@ jobs:
             cd /home/ubuntu/BuyDecision/Dev
             ./start.sh $VERSION
 
-  # -----------------------------
-  # 3️⃣ Manual approval for UAT
-  # -----------------------------
   uat-approval:
     runs-on: ubuntu-latest
     needs: deploy-dev
     environment:
-      name: uat  # set up "uat" environment in GitHub with required reviewers
+      name: uat
     steps:
-      - name: Await manual approval
-        run: echo "Waiting for UAT approval..."
+      - run: echo "Waiting for UAT approval..."
 
-  # -----------------------------
-  # 4️⃣ Deploy to UAT
-  # -----------------------------
   deploy-uat:
     runs-on: ubuntu-latest
     needs: uat-approval
@@ -95,21 +82,14 @@ jobs:
             cd /home/ubuntu/BuyDecision/UAT
             ./start.sh $VERSION
 
-  # -----------------------------
-  # 5️⃣ Manual approval for Prod
-  # -----------------------------
   prod-approval:
     runs-on: ubuntu-latest
     needs: deploy-uat
     environment:
-      name: prod  # set up "prod" environment in GitHub with required reviewers
+      name: prod
     steps:
-      - name: Await manual approval
-        run: echo "Waiting for PROD approval..."
+      - run: echo "Waiting for PROD approval..."
 
-  # -----------------------------
-  # 6️⃣ Deploy to Prod
-  # -----------------------------
   deploy-prod:
     runs-on: ubuntu-latest
     needs: prod-approval
